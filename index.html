@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Escáner · Manifiesto QR</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsqr/1.4.0/jsQR.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --bg: #0F1214;
+    --panel: #171B1E;
+    --panel-2: #1E2327;
+    --line: #2A3034;
+    --ink: #E9EDEF;
+    --ink-dim: #8B959B;
+    --laser: #FF3B30;
+    --laser-glow: rgba(255,59,48,0.35);
+    --ok: #39D98A;
+    --amber: #F5A623;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color: transparent;}
+  html,body{height:100%;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:'IBM Plex Mono', monospace;
+    display:flex; flex-direction:column;
+    min-height:100vh;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  header{
+    padding:18px 18px 14px;
+    border-bottom:1px solid var(--line);
+    display:flex; justify-content:space-between; align-items:flex-end;
+  }
+  .eyebrow{
+    font-size:11px; letter-spacing:0.18em; color:var(--ink-dim); text-transform:uppercase;
+  }
+  h1{
+    font-family:'Space Grotesk', sans-serif;
+    font-weight:700; font-size:22px; margin:2px 0 0; letter-spacing:-0.01em;
+  }
+  .count{
+    text-align:right;
+  }
+  .count .n{ font-size:26px; font-weight:700; font-family:'Space Grotesk', sans-serif; color:var(--amber); line-height:1;}
+  .count .l{ font-size:10px; letter-spacing:0.14em; color:var(--ink-dim); text-transform:uppercase;}
+
+  .scanner{
+    position:relative; margin:16px; border-radius:14px; overflow:hidden;
+    background:#000; aspect-ratio: 1 / 1; max-height: 46vh;
+    border:1px solid var(--line);
+  }
+  video{ width:100%; height:100%; object-fit:cover; display:block; }
+  canvas{ display:none; }
+  .frame{
+    position:absolute; inset:0; pointer-events:none;
+  }
+  .corner{
+    position:absolute; width:26px; height:26px; border-color:var(--amber);
+    opacity:0.9;
+  }
+  .corner.tl{ top:14px; left:14px; border-top:3px solid; border-left:3px solid; border-radius: 4px 0 0 0;}
+  .corner.tr{ top:14px; right:14px; border-top:3px solid; border-right:3px solid; border-radius: 0 4px 0 0;}
+  .corner.bl{ bottom:14px; left:14px; border-bottom:3px solid; border-left:3px solid; border-radius: 0 0 0 4px;}
+  .corner.br{ bottom:14px; right:14px; border-bottom:3px solid; border-right:3px solid; border-radius: 0 0 4px 0;}
+  .laser{
+    position:absolute; left:8%; right:8%; height:2px; background:var(--laser);
+    box-shadow: 0 0 8px 2px var(--laser-glow);
+    top:50%;
+    animation: sweep 2.2s ease-in-out infinite;
+  }
+  @keyframes sweep{
+    0%{ top:12%; opacity:0.9; }
+    50%{ top:88%; opacity:0.9; }
+    100%{ top:12%; opacity:0.9; }
+  }
+  .status{
+    position:absolute; bottom:0; left:0; right:0;
+    padding:10px 14px; font-size:11.5px; letter-spacing:0.03em;
+    background:linear-gradient(0deg, rgba(0,0,0,0.75), transparent);
+    color:var(--ink-dim);
+  }
+  .status.ok{ color:var(--ok); }
+  .status.err{ color:var(--laser); }
+
+  .flash{
+    position:absolute; inset:0; background:var(--ok); opacity:0;
+    pointer-events:none;
+  }
+  .flash.hit{ animation: blink 320ms ease-out; }
+  @keyframes blink{ 0%{opacity:0.55;} 100%{opacity:0;} }
+
+  main{ flex:1; overflow:auto; padding: 0 16px 16px; }
+  .section-label{
+    font-size:11px; letter-spacing:0.14em; color:var(--ink-dim); text-transform:uppercase;
+    margin: 6px 2px 8px; display:flex; justify-content:space-between; align-items:center;
+  }
+  .manifest{
+    border:1px solid var(--line); border-radius:10px; overflow:hidden;
+    background:var(--panel);
+  }
+  .row{
+    display:flex; align-items:center; gap:10px;
+    padding:11px 12px; border-bottom:1px solid var(--line);
+    font-size:12.5px;
+  }
+  .row:last-child{ border-bottom:none; }
+  .row .idx{ color:var(--ink-dim); font-size:11px; width:20px; flex-shrink:0; }
+  .row .fields{ flex:1; min-width:0; }
+  .row .fields .k{ color:var(--ink-dim); }
+  .row .fields .line{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .row .time{ color:var(--ink-dim); font-size:10.5px; flex-shrink:0; }
+  .row .del{
+    background:none; border:none; color:var(--ink-dim); font-size:16px; padding:4px 6px; cursor:pointer; flex-shrink:0;
+  }
+  .row .del:active{ color:var(--laser); }
+
+  .empty{
+    padding:28px 16px; text-align:center; color:var(--ink-dim); font-size:12.5px; line-height:1.6;
+  }
+
+  footer{
+    display:flex; gap:10px; padding:12px 16px; border-top:1px solid var(--line);
+    background:var(--panel);
+  }
+  button.action{
+    flex:1; padding:14px 10px; border-radius:10px; border:1px solid var(--line);
+    font-family:'Space Grotesk', sans-serif; font-weight:700; font-size:13px;
+    letter-spacing:0.02em; cursor:pointer;
+  }
+  .btn-export{ background:var(--amber); color:#141414; border-color:var(--amber); }
+  .btn-export:disabled{ background:var(--panel-2); color:var(--ink-dim); border-color:var(--line); }
+  .btn-clear{ background:var(--panel-2); color:var(--ink-dim); }
+  .btn-clear:active{ color:var(--laser); }
+
+  :focus-visible{ outline:2px solid var(--amber); outline-offset:2px; }
+  @media (prefers-reduced-motion: reduce){
+    .laser{ animation:none; top:50%; }
+    .flash.hit{ animation:none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="eyebrow">Manifiesto digital</div>
+    <h1>Escáner QR</h1>
+  </div>
+  <div class="count">
+    <div class="n" id="countN">0</div>
+    <div class="l">registros</div>
+  </div>
+</header>
+
+<div class="scanner">
+  <video id="video" playsinline muted autoplay></video>
+  <canvas id="canvas"></canvas>
+  <div class="flash" id="flash"></div>
+  <div class="frame">
+    <div class="corner tl"></div>
+    <div class="corner tr"></div>
+    <div class="corner bl"></div>
+    <div class="corner br"></div>
+    <div class="laser" id="laser"></div>
+  </div>
+  <div class="status" id="status">Iniciando cámara…</div>
+</div>
+
+<main>
+  <div class="section-label">
+    <span>Lista</span>
+    <span id="colHint" style="color:var(--ink-dim); font-weight:400;"></span>
+  </div>
+  <div class="manifest" id="manifest">
+    <div class="empty" id="emptyMsg">Todavía no hay registros.<br>Apunta la cámara a un código QR para empezar.</div>
+  </div>
+</main>
+
+<footer>
+  <button class="action btn-clear" id="clearBtn">Vaciar lista</button>
+  <button class="action btn-export" id="exportBtn" disabled>Exportar a Excel</button>
+</footer>
+
+<script>
+(function(){
+  const STORAGE_KEY = 'scans';
+  let entries = [];
+  let lastCode = null;
+  let lastCodeTime = 0;
+  const DEBOUNCE_MS = 2000;
+
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const statusEl = document.getElementById('status');
+  const flashEl = document.getElementById('flash');
+  const laserEl = document.getElementById('laser');
+  const manifestEl = document.getElementById('manifest');
+  const emptyMsg = document.getElementById('emptyMsg');
+  const countN = document.getElementById('countN');
+  const colHint = document.getElementById('colHint');
+  const exportBtn = document.getElementById('exportBtn');
+  const clearBtn = document.getElementById('clearBtn');
+
+  function setStatus(text, kind){
+    statusEl.textContent = text;
+    statusEl.className = 'status' + (kind ? ' ' + kind : '');
+  }
+
+  function fmtTime(iso){
+    const d = new Date(iso);
+    return d.toLocaleTimeString('es', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  }
+
+  function allColumns(){
+    const cols = [];
+    entries.forEach(e => {
+      Object.keys(e.data).forEach(k => { if (!cols.includes(k)) cols.push(k); });
+    });
+    return cols;
+  }
+
+  function render(){
+    countN.textContent = entries.length;
+    exportBtn.disabled = entries.length === 0;
+    const cols = allColumns();
+    colHint.textContent = cols.length ? cols.join(' · ') : '';
+
+    if (entries.length === 0){
+      manifestEl.innerHTML = '';
+      manifestEl.appendChild(emptyMsg);
+      return;
+    }
+
+    manifestEl.innerHTML = '';
+    entries.slice().reverse().forEach((e, revIdx) => {
+      const realIdx = entries.length - 1 - revIdx;
+      const row = document.createElement('div');
+      row.className = 'row';
+
+      const idx = document.createElement('div');
+      idx.className = 'idx';
+      idx.textContent = String(realIdx + 1);
+
+      const fields = document.createElement('div');
+      fields.className = 'fields';
+      const line = document.createElement('div');
+      line.className = 'line';
+      const preview = Object.entries(e.data).map(([k,v]) => k + ': ' + v).join('  ·  ');
+      line.textContent = preview;
+      const time = document.createElement('div');
+      time.className = 'time';
+      time.textContent = fmtTime(e.timestamp);
+      fields.appendChild(line);
+      fields.appendChild(time);
+
+      const del = document.createElement('button');
+      del.className = 'del';
+      del.textContent = '✕';
+      del.setAttribute('aria-label', 'Eliminar registro');
+      del.onclick = () => removeEntry(realIdx);
+
+      row.appendChild(idx);
+      row.appendChild(fields);
+      row.appendChild(del);
+      manifestEl.appendChild(row);
+    });
+  }
+
+  function persist(){
+    try{
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+    }catch(err){
+      console.error('No se pudo guardar', err);
+    }
+  }
+
+  function loadEntries(){
+    try{
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw){
+        entries = JSON.parse(raw);
+      }
+    }catch(err){
+      entries = [];
+    }
+    render();
+  }
+
+  function removeEntry(idx){
+    entries.splice(idx, 1);
+    persist();
+    render();
+  }
+
+  clearBtn.onclick = () => {
+    if (entries.length === 0) return;
+    if (confirm('¿Vaciar toda la lista? Esta acción no se puede deshacer.')){
+      entries = [];
+      persist();
+      render();
+    }
+  };
+
+  exportBtn.onclick = () => {
+    if (entries.length === 0) return;
+    const cols = allColumns();
+    const rows = entries.map(e => {
+      const row = {};
+      cols.forEach(c => { row[c] = e.data[c] !== undefined ? e.data[c] : ''; });
+      row['hora_escaneo'] = fmtTime(e.timestamp);
+      return row;
+    });
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Escaneos');
+    const stamp = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+    XLSX.writeFile(wb, 'escaneos-qr-' + stamp + '.xlsx');
+  };
+
+  function flashOk(){
+    flashEl.classList.remove('hit');
+    void flashEl.offsetWidth;
+    flashEl.classList.add('hit');
+  }
+
+  function handleDecoded(text){
+    const now = Date.now();
+    if (text === lastCode && (now - lastCodeTime) < DEBOUNCE_MS) return;
+    lastCode = text;
+    lastCodeTime = now;
+
+    let data;
+    try{
+      data = JSON.parse(text);
+      if (typeof data !== 'object' || data === null || Array.isArray(data)){
+        throw new Error('not an object');
+      }
+    }catch(err){
+      setStatus('QR leído, pero no contiene datos JSON válidos.', 'err');
+      return;
+    }
+
+    entries.push({ timestamp: new Date().toISOString(), data });
+    persist();
+    render();
+    flashOk();
+    setStatus('Registro añadido ✓', 'ok');
+    setTimeout(() => setStatus('Buscando código QR…'), 1400);
+  }
+
+  let scanning = false;
+  let rafId = null;
+
+  function tick(){
+    if (video.readyState === video.HAVE_ENOUGH_DATA){
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' });
+      if (code && code.data){
+        handleDecoded(code.data);
+      }
+    }
+    rafId = requestAnimationFrame(tick);
+  }
+
+  async function startCamera(){
+    try{
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 1280 } },
+        audio: false
+      });
+      video.srcObject = stream;
+      await video.play();
+      setStatus('Buscando código QR…');
+      scanning = true;
+      tick();
+    }catch(err){
+      laserEl.style.display = 'none';
+      setStatus('No se pudo acceder a la cámara. Revisa los permisos.', 'err');
+    }
+  }
+
+  loadEntries();
+  startCamera();
+})();
+</script>
+
+</body>
+</html>
