@@ -351,9 +351,14 @@
     video.srcObject = null;
   }
 
+  let starting = false;
+
   async function startCamera(){
+    if (currentStream || starting) return;
+    starting = true;
+    let stream;
     try{
-      const stream = await navigator.mediaDevices.getUserMedia({
+      stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: 'environment',
           width: { ideal: 480, max: 640 },
@@ -362,21 +367,32 @@
         },
         audio: false
       });
-      currentStream = stream;
-      video.srcObject = stream;
-      await video.play();
-      setStatus('Buscando código QR…');
-      tick();
     }catch(err){
+      starting = false;
       laserEl.style.display = 'none';
       setStatus('No se pudo acceder a la cámara. Revisa los permisos.', 'err');
+      return;
+    }
+
+    currentStream = stream;
+    video.srcObject = stream;
+    try{
+      await video.play();
+    }catch(err){
+      // El play() puede interrumpirse por el propio cartel de permiso de iOS;
+      // el video igual queda corriendo, así que no lo tratamos como error fatal.
+    }
+    starting = false;
+    if (currentStream){
+      setStatus('Buscando código QR…');
+      tick();
     }
   }
 
   document.addEventListener('visibilitychange', () => {
     if (document.hidden){
-      stopCamera();
-    } else if (!currentStream){
+      if (!starting){ stopCamera(); }
+    } else if (!currentStream && !starting){
       startCamera();
     }
   });
