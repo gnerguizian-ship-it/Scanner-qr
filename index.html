@@ -192,6 +192,8 @@
 
   let currentStream = null;
   let scanTimer = null;
+  let lastVideoTime = -1;
+  let stallTicks = 0;
 
   function setStatus(text, kind){
     statusEl.textContent = text;
@@ -338,6 +340,24 @@
 
   function tick(){
     if (video.readyState === video.HAVE_ENOUGH_DATA && video.videoWidth > 0){
+      // Detectar si el video dejó de avanzar (se "congeló")
+      if (video.currentTime === lastVideoTime){
+        stallTicks++;
+      } else {
+        stallTicks = 0;
+        lastVideoTime = video.currentTime;
+      }
+      if (stallTicks >= 6){
+        stallTicks = 0;
+        setStatus('La cámara se congeló, reiniciando…', 'err');
+        stopCamera();
+        setTimeout(startCamera, 300);
+        return;
+      }
+      if (video.paused){
+        video.play().catch(() => {});
+      }
+
       const vw = video.videoWidth, vh = video.videoHeight;
       const side = Math.min(vw, vh);
       const sx = (vw - side) / 2, sy = (vh - side) / 2;
@@ -388,6 +408,8 @@
 
     currentStream = stream;
     video.srcObject = stream;
+    lastVideoTime = -1;
+    stallTicks = 0;
     try{
       await video.play();
     }catch(err){
