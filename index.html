@@ -363,6 +363,7 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
       const sx = (vw - side) / 2, sy = (vh - side) / 2;
 
       let found = null;
+      let engineError = null;
       try{
         debugCtx.drawImage(video, sx, sy, side, side, 0, 0, debugCanvas.width, debugCanvas.height);
         ctx.drawImage(video, sx, sy, side, side, 0, 0, SCAN_SIZE, SCAN_SIZE);
@@ -376,11 +377,14 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
           found = symbols[0].decode();
         }
       }catch(err){
-        // frame suelto sin detección o timeout del motor; se reintenta en el próximo ciclo
+        engineError = (err && err.message) ? err.message : String(err);
+        console.error('Error del motor de escaneo:', err);
       }
 
       if (found){
         handleDecoded(found);
+      } else if (engineError && engineError !== 'timeout'){
+        setStatus('Error del motor: ' + engineError, 'err');
       } else if (!statusEl.classList.contains('ok')) {
         setStatus('Buscando código QR… (' + vw + '×' + vh + ' · zbar)');
       }
