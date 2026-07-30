@@ -181,4 +181,278 @@
   debugCanvas.width = 160; debugCanvas.height = 160;
   const debugCtx = debugCanvas.getContext('2d');
   const statusEl = document.getElementById('status');
-  const flashEl = document.getElementById('flash
+  const flashEl = document.getElementById('flash');
+  const laserEl = document.getElementById('laser');
+  const manifestEl = document.getElementById('manifest');
+  const emptyMsg = document.getElementById('emptyMsg');
+  const countN = document.getElementById('countN');
+  const colHint = document.getElementById('colHint');
+  const exportBtn = document.getElementById('exportBtn');
+  const clearBtn = document.getElementById('clearBtn');
+
+  let currentStream = null;
+  let scanTimer = null;
+  let lastVideoTime = -1;
+  let stallTicks = 0;
+
+  function setStatus(text, kind){
+    statusEl.textContent = text;
+    statusEl.className = 'status' + (kind ? ' ' + kind : '');
+  }
+
+  function fmtTime(iso){
+    const d = new Date(iso);
+    return d.toLocaleTimeString('es', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  }
+
+  function allColumns(){
+    const cols = [];
+    entries.forEach(e => {
+      Object.keys(e.data).forEach(k => { if (!cols.includes(k)) cols.push(k); });
+    });
+    return cols;
+  }
+
+  function render(){
+    countN.textContent = entries.length;
+    exportBtn.disabled = entries.length === 0;
+    const cols = allColumns();
+    colHint.textContent = cols.length ? cols.join(' · ') : '';
+
+    if (entries.length === 0){
+      manifestEl.innerHTML = '';
+      manifestEl.appendChild(emptyMsg);
+      return;
+    }
+
+    manifestEl.innerHTML = '';
+    entries.slice().reverse().forEach((e, revIdx) => {
+      const realIdx = entries.length - 1 - revIdx;
+      const row = document.createElement('div');
+      row.className = 'row';
+
+      const idx = document.createElement('div');
+      idx.className = 'idx';
+      idx.textContent = String(realIdx + 1);
+
+      const fields = document.createElement('div');
+      fields.className = 'fields';
+      const line = document.createElement('div');
+      line.className = 'line';
+      const preview = Object.entries(e.data).map(([k,v]) => k + ': ' + v).join('  ·  ');
+      line.textContent = preview;
+      const time = document.createElement('div');
+      time.className = 'time';
+      time.textContent = fmtTime(e.timestamp);
+      fields.appendChild(line);
+      fields.appendChild(time);
+
+      const del = document.createElement('button');
+      del.className = 'del';
+      del.textContent = '✕';
+      del.setAttribute('aria-label', 'Eliminar registro');
+      del.onclick = () => removeEntry(realIdx);
+
+      row.appendChild(idx);
+      row.appendChild(fields);
+      row.appendChild(del);
+      manifestEl.appendChild(row);
+    });
+  }
+
+  function persist(){
+    try{
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+    }catch(err){
+      console.error('No se pudo guardar', err);
+    }
+  }
+
+  function loadEntries(){
+    try{
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw){ entries = JSON.parse(raw); }
+    }catch(err){ entries = []; }
+    render();
+  }
+
+  function removeEntry(idx){
+    entries.splice(idx, 1);
+    persist();
+    render();
+  }
+
+  clearBtn.onclick = () => {
+    if (entries.length === 0) return;
+    if (confirm('¿Vaciar toda la lista? Esta acción no se puede deshacer.')){
+      entries = [];
+      persist();
+      render();
+    }
+  };
+
+  exportBtn.onclick = () => {
+    if (entries.length === 0) return;
+    const cols = allColumns();
+    const rows = entries.map(e => {
+      const row = {};
+      cols.forEach(c => { row[c] = e.data[c] !== undefined ? e.data[c] : ''; });
+      row['hora_escaneo'] = fmtTime(e.timestamp);
+      return row;
+    });
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Escaneos');
+    const stamp = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+    XLSX.writeFile(wb, 'escaneos-qr-' + stamp + '.xlsx');
+  };
+
+  function flashOk(){
+    flashEl.classList.remove('hit');
+    void flashEl.offsetWidth;
+    flashEl.classList.add('hit');
+  }
+
+  function handleDecoded(text){
+    const now = Date.now();
+    if (text === lastCode && (now - lastCodeTime) < DEBOUNCE_MS) return;
+    lastCode = text;
+    lastCodeTime = now;
+
+    let data;
+    try{
+      data = JSON.parse(text);
+      if (typeof data !== 'object' || data === null || Array.isArray(data)){
+        throw new Error('not an object');
+      }
+    }catch(err){
+      setStatus('QR leído, pero no contiene datos JSON válidos.', 'err');
+      return;
+    }
+
+    entries.push({ timestamp: new Date().toISOString(), data });
+    persist();
+    render();
+    flashOk();
+    setStatus('Registro añadido ✓', 'ok');
+    setTimeout(() => setStatus('Buscando código QR…'), 1400);
+  }
+
+  let detector = null;
+  if ('BarcodeDetector' in window){
+    try{ detector = new BarcodeDetector({ formats: ['qr_code'] }); }catch(e){ detector = null; }
+  }
+
+  async function tick(){
+    if (video.readyState === video.HAVE_ENOUGH_DATA && video.videoWidth > 0){
+      if (video.currentTime === lastVideoTime){
+        stallTicks++;
+      } else {
+        stallTicks = 0;
+        lastVideoTime = video.currentTime;
+      }
+      if (stallTicks >= 6){
+        stallTicks = 0;
+        setStatus('La cámara se congeló, reiniciando…', 'err');
+        stopCamera();
+        setTimeout(startCamera, 300);
+        return;
+      }
+      if (video.paused){
+        video.play().catch(() => {});
+      }
+
+      const vw = video.videoWidth, vh = video.videoHeight;
+      const side = Math.min(vw, vh);
+      const sx = (vw - side) / 2, sy = (vh - side) / 2;
+      debugCtx.drawImage(video, sx, sy, side, side, 0, 0, debugCanvas.width, debugCanvas.height);
+
+      let found = null;
+
+      if (detector){
+        try{
+          const codes = await detector.detect(video);
+          if (codes && codes.length){ found = codes[0].rawValue; }
+        }catch(err){ /* frame suelto sin detección, se ignora */ }
+      } else {
+        ctx.drawImage(video, sx, sy, side, side, 0, 0, SCAN_SIZE, SCAN_SIZE);
+        const imageData = ctx.getImageData(0, 0, SCAN_SIZE, SCAN_SIZE);
+        const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'attemptBoth' });
+        if (code && code.data){ found = code.data; }
+      }
+
+      if (found){
+        handleDecoded(found);
+      } else if (!statusEl.classList.contains('ok')) {
+        setStatus('Buscando código QR… (' + vw + '×' + vh + (detector ? ' · nativo' : ' · jsQR') + ')');
+      }
+    }
+    scanTimer = setTimeout(tick, SCAN_INTERVAL_MS);
+  }
+
+  function stopCamera(){
+    if (scanTimer){ clearTimeout(scanTimer); scanTimer = null; }
+    if (currentStream){
+      currentStream.getTracks().forEach(track => track.stop());
+      currentStream = null;
+    }
+    video.srcObject = null;
+  }
+
+  let starting = false;
+
+  async function startCamera(){
+    if (currentStream || starting) return;
+    starting = true;
+    let stream;
+    try{
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: 'environment',
+          width: { ideal: 960, max: 1280 },
+          height: { ideal: 960, max: 1280 },
+          frameRate: { ideal: 15, max: 20 }
+        },
+        audio: false
+      });
+    }catch(err){
+      starting = false;
+      laserEl.style.display = 'none';
+      setStatus('No se pudo acceder a la cámara. Revisa los permisos.', 'err');
+      return;
+    }
+
+    currentStream = stream;
+    video.srcObject = stream;
+    lastVideoTime = -1;
+    stallTicks = 0;
+    try{
+      await video.play();
+    }catch(err){
+      // El play() puede interrumpirse por el propio cartel de permiso de iOS;
+      // el video igual queda corriendo, así que no lo tratamos como error fatal.
+    }
+    starting = false;
+    if (currentStream){
+      setStatus('Buscando código QR…');
+      tick();
+    }
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden){
+      if (!starting){ stopCamera(); }
+    } else if (!currentStream && !starting){
+      startCamera();
+    }
+  });
+
+  window.addEventListener('pagehide', stopCamera);
+
+  loadEntries();
+  startCamera();
+})();
+</script>
+
+</body>
+</html>
