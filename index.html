@@ -345,6 +345,7 @@
 
   async function tick(){
     if (video.readyState === video.HAVE_ENOUGH_DATA && video.videoWidth > 0){
+      // Detectar si el video dejó de avanzar (se "congeló")
       if (video.currentTime === lastVideoTime){
         stallTicks++;
       } else {
@@ -365,20 +366,31 @@
       const vw = video.videoWidth, vh = video.videoHeight;
       const side = Math.min(vw, vh);
       const sx = (vw - side) / 2, sy = (vh - side) / 2;
-      debugCtx.drawImage(video, sx, sy, side, side, 0, 0, debugCanvas.width, debugCanvas.height);
 
       let found = null;
-
-      if (detector){
-        try{
-          const codes = await detector.detect(video);
-          if (codes && codes.length){ found = codes[0].rawValue; }
-        }catch(err){ /* frame suelto sin detección, se ignora */ }
-      } else {
+      try{
+        debugCtx.drawImage(video, sx, sy, side, side, 0, 0, debugCanvas.width, debugCanvas.height);
         ctx.drawImage(video, sx, sy, side, side, 0, 0, SCAN_SIZE, SCAN_SIZE);
-        const imageData = ctx.getImageData(0, 0, SCAN_SIZE, SCAN_SIZE);
-        const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'attemptBoth' });
-        if (code && code.data){ found = code.data; }
+
+        if (detector){
+          try{
+            const codes = await Promise.race([
+              detector.detect(canvas),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 700))
+            ]);
+            if (codes && codes.length){ found = codes[0].rawValue; }
+          }catch(err){
+            const imageData = ctx.getImageData(0, 0, SCAN_SIZE, SCAN_SIZE);
+            const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'attemptBoth' });
+            if (code && code.data){ found = code.data; }
+          }
+        } else {
+          const imageData = ctx.getImageData(0, 0, SCAN_SIZE, SCAN_SIZE);
+          const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'attemptBoth' });
+          if (code && code.data){ found = code.data; }
+        }
+      }catch(drawErr){
+        // si el dibujo del frame falla, simplemente reintentamos en el próximo ciclo
       }
 
       if (found){
