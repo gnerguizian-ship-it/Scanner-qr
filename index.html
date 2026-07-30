@@ -6,7 +6,6 @@
 <title>Escáner · Manifiesto QR</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jsqr/1.4.0/jsQR.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root{
@@ -162,7 +161,8 @@
   <button class="action btn-export" id="exportBtn" disabled>Exportar a Excel</button>
 </footer>
 
-<script>
+<script type="module">
+import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.0/dist/index.js';
 (function(){
   const STORAGE_KEY = 'scans';
   let entries = [];
@@ -338,11 +338,6 @@
     setTimeout(() => setStatus('Buscando código QR…'), 1400);
   }
 
-  let detector = null;
-  if ('BarcodeDetector' in window){
-    try{ detector = new BarcodeDetector({ formats: ['qr_code'] }); }catch(e){ detector = null; }
-  }
-
   async function tick(){
     if (video.readyState === video.HAVE_ENOUGH_DATA && video.videoWidth > 0){
       // Detectar si el video dejó de avanzar (se "congeló")
@@ -371,32 +366,23 @@
       try{
         debugCtx.drawImage(video, sx, sy, side, side, 0, 0, debugCanvas.width, debugCanvas.height);
         ctx.drawImage(video, sx, sy, side, side, 0, 0, SCAN_SIZE, SCAN_SIZE);
+        const imageData = ctx.getImageData(0, 0, SCAN_SIZE, SCAN_SIZE);
 
-        if (detector){
-          try{
-            const codes = await Promise.race([
-              detector.detect(canvas),
-              new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 700))
-            ]);
-            if (codes && codes.length){ found = codes[0].rawValue; }
-          }catch(err){
-            const imageData = ctx.getImageData(0, 0, SCAN_SIZE, SCAN_SIZE);
-            const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'attemptBoth' });
-            if (code && code.data){ found = code.data; }
-          }
-        } else {
-          const imageData = ctx.getImageData(0, 0, SCAN_SIZE, SCAN_SIZE);
-          const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'attemptBoth' });
-          if (code && code.data){ found = code.data; }
+        const symbols = await Promise.race([
+          zbarWasm.scanImageData(imageData),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 900))
+        ]);
+        if (symbols && symbols.length){
+          found = symbols[0].decode();
         }
-      }catch(drawErr){
-        // si el dibujo del frame falla, simplemente reintentamos en el próximo ciclo
+      }catch(err){
+        // frame suelto sin detección o timeout del motor; se reintenta en el próximo ciclo
       }
 
       if (found){
         handleDecoded(found);
       } else if (!statusEl.classList.contains('ok')) {
-        setStatus('Buscando código QR… (' + vw + '×' + vh + (detector ? ' · nativo' : ' · jsQR') + ')');
+        setStatus('Buscando código QR… (' + vw + '×' + vh + ' · zbar)');
       }
     }
     scanTimer = setTimeout(tick, SCAN_INTERVAL_MS);
