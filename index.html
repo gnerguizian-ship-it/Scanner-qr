@@ -319,6 +319,13 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
     lastCode = text;
     lastCodeTime = now;
 
+    const yaExiste = entries.some(e => e.rawText === text);
+    if (yaExiste){
+      setStatus('Este código ya fue registrado antes ⚠', 'err');
+      setTimeout(() => setStatus('Buscando código QR…'), 1800);
+      return;
+    }
+
     let data;
     try{
       data = JSON.parse(text);
@@ -330,7 +337,7 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
       return;
     }
 
-    entries.push({ timestamp: new Date().toISOString(), data });
+    entries.push({ timestamp: new Date().toISOString(), data, rawText: text });
     persist();
     render();
     flashOk();
