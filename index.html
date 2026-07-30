@@ -54,17 +54,6 @@
   .corner.tr{ top:14px; right:14px; border-top:3px solid; border-right:3px solid; border-radius: 0 4px 0 0;}
   .corner.bl{ bottom:14px; left:14px; border-bottom:3px solid; border-left:3px solid; border-radius: 0 0 0 4px;}
   .corner.br{ bottom:14px; right:14px; border-bottom:3px solid; border-right:3px solid; border-radius: 0 0 4px 0;}
-  .laser{
-    position:absolute; left:8%; right:8%; height:2px; background:var(--laser);
-    top:50%;
-    animation: sweep 2.6s ease-in-out infinite;
-    will-change: top;
-  }
-  @keyframes sweep{
-    0%{ top:12%; }
-    50%{ top:88%; }
-    100%{ top:12%; }
-  }
   .status{
     position:absolute; bottom:0; left:0; right:0;
     padding:10px 14px; font-size:11.5px; letter-spacing:0.03em;
@@ -75,14 +64,13 @@
   .status.err{ color:var(--laser); }
 
   .zoomBar{
-    position:absolute; top:14px; left:50%; transform:translateX(-50%);
-    display:flex; align-items:center; gap:8px;
-    background:rgba(0,0,0,0.55); border-radius:20px; padding:6px 12px;
-    z-index:6; backdrop-filter:blur(2px);
+    display:flex; align-items:center; gap:10px;
+    margin:0 16px 14px; padding:10px 14px;
+    background:var(--panel); border:1px solid var(--line); border-radius:10px;
   }
-  .zoomBar .zLabel{ font-size:11px; color:var(--amber); font-weight:600; min-width:30px; text-align:center; }
+  .zoomBar .zLabel{ font-size:11px; color:var(--amber); font-weight:600; min-width:32px; text-align:right; }
   .zoomBar input[type="range"]{
-    width:120px; accent-color: var(--amber);
+    flex:1; accent-color: var(--amber);
   }
 
   .flash{ position:absolute; inset:0; background:var(--ok); opacity:0; pointer-events:none; }
@@ -119,7 +107,6 @@
 
   :focus-visible{ outline:2px solid var(--amber); outline-offset:2px; }
   @media (prefers-reduced-motion: reduce){
-    .laser{ animation:none; top:50%; }
     .flash.hit{ animation:none; }
   }
 </style>
@@ -140,20 +127,20 @@
 <div class="scanner">
   <video id="video" playsinline muted autoplay></video>
   <canvas id="canvas"></canvas>
-  <div class="zoomBar">
-    <span style="font-size:11px; color:var(--ink-dim);">🔍</span>
-    <input type="range" id="zoomRange" min="1" max="3.5" step="0.1" value="1">
-    <span class="zLabel" id="zoomLabel">1.0x</span>
-  </div>
   <div class="flash" id="flash"></div>
   <div class="frame">
     <div class="corner tl"></div>
     <div class="corner tr"></div>
     <div class="corner bl"></div>
     <div class="corner br"></div>
-    <div class="laser" id="laser"></div>
   </div>
   <div class="status" id="status">Iniciando cámara…</div>
+</div>
+
+<div class="zoomBar">
+  <span style="font-size:13px;">🔍</span>
+  <input type="range" id="zoomRange" min="1" max="3.5" step="0.1" value="1">
+  <span class="zLabel" id="zoomLabel">1.0x</span>
 </div>
 
 <main>
@@ -189,7 +176,6 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   const statusEl = document.getElementById('status');
   const flashEl = document.getElementById('flash');
-  const laserEl = document.getElementById('laser');
   const manifestEl = document.getElementById('manifest');
   const emptyMsg = document.getElementById('emptyMsg');
   const countN = document.getElementById('countN');
@@ -454,7 +440,6 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
       });
     }catch(err){
       starting = false;
-      laserEl.style.display = 'none';
       setStatus('No se pudo acceder a la cámara. Revisa los permisos.', 'err');
       return;
     }
