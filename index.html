@@ -65,23 +65,13 @@
 
   .zoomBar{
     display:flex; align-items:center; gap:10px;
-    margin:0 16px 12px; padding:10px 14px;
+    margin:0 16px 14px; padding:10px 14px;
     background:var(--panel); border:1px solid var(--line); border-radius:10px;
   }
   .zoomBar .zLabel{ font-size:11px; color:var(--amber); font-weight:600; min-width:32px; text-align:right; }
   .zoomBar input[type="range"]{
     flex:1; accent-color: var(--amber);
   }
-
-  .uploadBar{ margin:0 16px 14px; }
-  .uploadBtn{
-    width:100%; padding:12px; border-radius:10px; border:1px dashed var(--line);
-    background:var(--panel); color:var(--ink-dim);
-    font-family:'IBM Plex Mono', monospace; font-size:12.5px;
-    display:flex; align-items:center; justify-content:center; gap:8px;
-    cursor:pointer;
-  }
-  .uploadBtn:active{ border-color:var(--amber); color:var(--amber); }
 
   .flash{ position:absolute; inset:0; background:var(--ok); opacity:0; pointer-events:none; }
   .flash.hit{ animation: blink 320ms ease-out; }
@@ -153,11 +143,6 @@
   <span class="zLabel" id="zoomLabel">1.0x</span>
 </div>
 
-<div class="uploadBar">
-  <input type="file" id="fileInput" accept="image/*" style="display:none">
-  <button type="button" class="uploadBtn" id="uploadBtn">📷 Subir una foto con un QR</button>
-</div>
-
 <main>
   <div class="section-label">
     <span>Lista</span>
@@ -189,10 +174,6 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
   canvas.width = SCAN_SIZE;
   canvas.height = SCAN_SIZE;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  const procCanvas = document.createElement('canvas');
-  procCanvas.width = SCAN_SIZE;
-  procCanvas.height = SCAN_SIZE;
-  const procCtx = procCanvas.getContext('2d', { willReadFrequently: true });
   const statusEl = document.getElementById('status');
   const flashEl = document.getElementById('flash');
   const manifestEl = document.getElementById('manifest');
@@ -203,8 +184,6 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
   const clearBtn = document.getElementById('clearBtn');
   const zoomRange = document.getElementById('zoomRange');
   const zoomLabel = document.getElementById('zoomLabel');
-  const fileInput = document.getElementById('fileInput');
-  const uploadBtn = document.getElementById('uploadBtn');
 
   let zoomLevel = 1;
   let trackSupportsZoom = false;
@@ -213,7 +192,6 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
   let scanTimer = null;
   let lastVideoTime = -1;
   let stallTicks = 0;
-  let missStreak = 0;
 
   function setStatus(text, kind){
     statusEl.textContent = text;
@@ -414,27 +392,10 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
 
         const symbols = await Promise.race([
           zbarWasm.scanImageData(imageData),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1200))
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 900))
         ]);
         if (symbols && symbols.length){
           found = symbols[0].decode();
-        }
-
-        // Si varios cuadros seguidos no detectaron nada, probamos una versión
-        // con más contraste y en blanco y negro: ayuda con QR sucios, arrugados
-        // o con poca luz, sin hacer más lento el caso normal.
-        if (!found && missStreak >= 2){
-          procCtx.filter = 'grayscale(100%) contrast(190%) brightness(112%)';
-          procCtx.drawImage(canvas, 0, 0);
-          procCtx.filter = 'none';
-          const procData = procCtx.getImageData(0, 0, SCAN_SIZE, SCAN_SIZE);
-          const symbols2 = await Promise.race([
-            zbarWasm.scanImageData(procData),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1200))
-          ]);
-          if (symbols2 && symbols2.length){
-            found = symbols2[0].decode();
-          }
         }
       }catch(err){
         engineError = (err && err.message) ? err.message : String(err);
@@ -442,15 +403,10 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
       }
 
       if (found){
-        missStreak = 0;
         handleDecoded(found);
-      } else {
-        missStreak++;
-      }
-
-      if (!found && engineError && engineError !== 'timeout'){
+      } else if (engineError && engineError !== 'timeout'){
         setStatus('Error del motor: ' + engineError, 'err');
-      } else if (!found && !statusEl.classList.contains('ok')) {
+      } else if (!statusEl.classList.contains('ok')) {
         setStatus('Buscando código QR… (' + vw + '×' + vh + ' · zbar)');
       }
     }
@@ -526,69 +482,6 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
   });
 
   window.addEventListener('pagehide', stopCamera);
-
-  async function scanUploadedFile(file){
-    if (!file) return;
-    uploadBtn.textContent = '⏳ Analizando foto…';
-    uploadBtn.disabled = true;
-    try{
-      const bitmap = await new Promise((resolve, reject) => {
-        const img = new Image();
-        img.onload = () => resolve(img);
-        img.onerror = reject;
-        img.src = URL.createObjectURL(file);
-      });
-
-      const MAX_SIDE = 1800;
-      let w = bitmap.naturalWidth, h = bitmap.naturalHeight;
-      if (Math.max(w, h) > MAX_SIDE){
-        const scale = MAX_SIDE / Math.max(w, h);
-        w = Math.round(w * scale);
-        h = Math.round(h * scale);
-      }
-
-      const tmpCanvas = document.createElement('canvas');
-      tmpCanvas.width = w;
-      tmpCanvas.height = h;
-      const tmpCtx = tmpCanvas.getContext('2d', { willReadFrequently: true });
-      tmpCtx.drawImage(bitmap, 0, 0, w, h);
-      const imageData = tmpCtx.getImageData(0, 0, w, h);
-
-      const symbols = await zbarWasm.scanImageData(imageData);
-      if (symbols && symbols.length){
-        handleDecoded(symbols[0].decode());
-      } else {
-        // Intento de respaldo con más contraste, por si la foto tiene poca luz o está sucia
-        const enhCanvas = document.createElement('canvas');
-        enhCanvas.width = w; enhCanvas.height = h;
-        const enhCtx = enhCanvas.getContext('2d', { willReadFrequently: true });
-        enhCtx.filter = 'grayscale(100%) contrast(190%) brightness(112%)';
-        enhCtx.drawImage(tmpCanvas, 0, 0);
-        const enhData = enhCtx.getImageData(0, 0, w, h);
-        const symbols2 = await zbarWasm.scanImageData(enhData);
-        if (symbols2 && symbols2.length){
-          handleDecoded(symbols2[0].decode());
-        } else {
-          setStatus('No se encontró ningún código QR en esa foto.', 'err');
-          setTimeout(() => setStatus('Buscando código QR…'), 2200);
-        }
-      }
-    }catch(err){
-      console.error('Error analizando la foto:', err);
-      setStatus('No se pudo analizar la foto.', 'err');
-    }finally{
-      uploadBtn.textContent = '📷 Subir una foto con un QR';
-      uploadBtn.disabled = false;
-      fileInput.value = '';
-    }
-  }
-
-  uploadBtn.addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', () => {
-    if (fileInput.files && fileInput.files[0]){
-      scanUploadedFile(fileInput.files[0]);
-    }
-  });
 
   loadEntries();
   startCamera();
