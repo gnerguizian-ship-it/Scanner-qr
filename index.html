@@ -181,14 +181,18 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
   let lastCode = null;
   let lastCodeTime = 0;
   const DEBOUNCE_MS = 2000;
-  const SCAN_INTERVAL_MS = 350;
-  const SCAN_SIZE = 520;
+  const SCAN_INTERVAL_MS = 400;
+  const SCAN_SIZE = 800;
 
   const video = document.getElementById('video');
   const canvas = document.getElementById('canvas');
   canvas.width = SCAN_SIZE;
   canvas.height = SCAN_SIZE;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const procCanvas = document.createElement('canvas');
+  procCanvas.width = SCAN_SIZE;
+  procCanvas.height = SCAN_SIZE;
+  const procCtx = procCanvas.getContext('2d', { willReadFrequently: true });
   const statusEl = document.getElementById('status');
   const flashEl = document.getElementById('flash');
   const manifestEl = document.getElementById('manifest');
@@ -209,6 +213,7 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
   let scanTimer = null;
   let lastVideoTime = -1;
   let stallTicks = 0;
+  let missStreak = 0;
 
   function setStatus(text, kind){
     statusEl.textContent = text;
@@ -414,16 +419,38 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
         if (symbols && symbols.length){
           found = symbols[0].decode();
         }
+
+        // Si varios cuadros seguidos no detectaron nada, probamos una versión
+        // con más contraste y en blanco y negro: ayuda con QR sucios, arrugados
+        // o con poca luz, sin hacer más lento el caso normal.
+        if (!found && missStreak >= 2){
+          procCtx.filter = 'grayscale(100%) contrast(190%) brightness(112%)';
+          procCtx.drawImage(canvas, 0, 0);
+          procCtx.filter = 'none';
+          const procData = procCtx.getImageData(0, 0, SCAN_SIZE, SCAN_SIZE);
+          const symbols2 = await Promise.race([
+            zbarWasm.scanImageData(procData),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1200))
+          ]);
+          if (symbols2 && symbols2.length){
+            found = symbols2[0].decode();
+          }
+        }
       }catch(err){
         engineError = (err && err.message) ? err.message : String(err);
         console.error('Error del motor de escaneo:', err);
       }
 
       if (found){
+        missStreak = 0;
         handleDecoded(found);
-      } else if (engineError && engineError !== 'timeout'){
+      } else {
+        missStreak++;
+      }
+
+      if (!found && engineError && engineError !== 'timeout'){
         setStatus('Error del motor: ' + engineError, 'err');
-      } else if (!statusEl.classList.contains('ok')) {
+      } else if (!found && !statusEl.classList.contains('ok')) {
         setStatus('Buscando código QR… (' + vw + '×' + vh + ' · zbar)');
       }
     }
@@ -449,8 +476,8 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
       stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: 'environment',
-          width: { ideal: 960, max: 1280 },
-          height: { ideal: 960, max: 1280 },
+          width: { ideal: 1440, max: 1920 },
+          height: { ideal: 1440, max: 1920 },
           frameRate: { ideal: 15, max: 20 }
         },
         audio: false
@@ -531,8 +558,20 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
       if (symbols && symbols.length){
         handleDecoded(symbols[0].decode());
       } else {
-        setStatus('No se encontró ningún código QR en esa foto.', 'err');
-        setTimeout(() => setStatus('Buscando código QR…'), 2200);
+        // Intento de respaldo con más contraste, por si la foto tiene poca luz o está sucia
+        const enhCanvas = document.createElement('canvas');
+        enhCanvas.width = w; enhCanvas.height = h;
+        const enhCtx = enhCanvas.getContext('2d', { willReadFrequently: true });
+        enhCtx.filter = 'grayscale(100%) contrast(190%) brightness(112%)';
+        enhCtx.drawImage(tmpCanvas, 0, 0);
+        const enhData = enhCtx.getImageData(0, 0, w, h);
+        const symbols2 = await zbarWasm.scanImageData(enhData);
+        if (symbols2 && symbols2.length){
+          handleDecoded(symbols2[0].decode());
+        } else {
+          setStatus('No se encontró ningún código QR en esa foto.', 'err');
+          setTimeout(() => setStatus('Buscando código QR…'), 2200);
+        }
       }
     }catch(err){
       console.error('Error analizando la foto:', err);
