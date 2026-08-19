@@ -65,13 +65,23 @@
 
   .zoomBar{
     display:flex; align-items:center; gap:10px;
-    margin:0 16px 14px; padding:10px 14px;
+    margin:0 16px 12px; padding:10px 14px;
     background:var(--panel); border:1px solid var(--line); border-radius:10px;
   }
   .zoomBar .zLabel{ font-size:11px; color:var(--amber); font-weight:600; min-width:32px; text-align:right; }
   .zoomBar input[type="range"]{
     flex:1; accent-color: var(--amber);
   }
+
+  .uploadBar{ margin:0 16px 14px; }
+  .uploadBtn{
+    width:100%; padding:12px; border-radius:10px; border:1px dashed var(--line);
+    background:var(--panel); color:var(--ink-dim);
+    font-family:'IBM Plex Mono', monospace; font-size:12.5px;
+    display:flex; align-items:center; justify-content:center; gap:8px;
+    cursor:pointer;
+  }
+  .uploadBtn:active{ border-color:var(--amber); color:var(--amber); }
 
   .flash{ position:absolute; inset:0; background:var(--ok); opacity:0; pointer-events:none; }
   .flash.hit{ animation: blink 320ms ease-out; }
@@ -143,6 +153,11 @@
   <span class="zLabel" id="zoomLabel">1.0x</span>
 </div>
 
+<div class="uploadBar">
+  <input type="file" id="fileInput" accept="image/*" style="display:none">
+  <button type="button" class="uploadBtn" id="uploadBtn">📷 Subir una foto con un QR</button>
+</div>
+
 <main>
   <div class="section-label">
     <span>Lista</span>
@@ -166,14 +181,18 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
   let lastCode = null;
   let lastCodeTime = 0;
   const DEBOUNCE_MS = 2000;
-  const SCAN_INTERVAL_MS = 350;
-  const SCAN_SIZE = 520;
+  const SCAN_INTERVAL_MS = 400;
+  const SCAN_SIZE = 800;
 
   const video = document.getElementById('video');
   const canvas = document.getElementById('canvas');
   canvas.width = SCAN_SIZE;
   canvas.height = SCAN_SIZE;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const procCanvas = document.createElement('canvas');
+  procCanvas.width = SCAN_SIZE;
+  procCanvas.height = SCAN_SIZE;
+  const procCtx = procCanvas.getContext('2d', { willReadFrequently: true });
   const statusEl = document.getElementById('status');
   const flashEl = document.getElementById('flash');
   const manifestEl = document.getElementById('manifest');
@@ -184,14 +203,18 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
   const clearBtn = document.getElementById('clearBtn');
   const zoomRange = document.getElementById('zoomRange');
   const zoomLabel = document.getElementById('zoomLabel');
+  const fileInput = document.getElementById('fileInput');
+  const uploadBtn = document.getElementById('uploadBtn');
 
   let zoomLevel = 1;
   let trackSupportsZoom = false;
+  let trackSupportsFocus = false;
 
   let currentStream = null;
   let scanTimer = null;
   let lastVideoTime = -1;
   let stallTicks = 0;
+  let missStreak = 0;
 
   function setStatus(text, kind){
     statusEl.textContent = text;
@@ -234,259 +257,4 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
       idx.textContent = String(realIdx + 1);
 
       const fields = document.createElement('div');
-      fields.className = 'fields';
-      const line = document.createElement('div');
-      line.className = 'line';
-      const preview = Object.entries(e.data).map(([k,v]) => k + ': ' + v).join('  ·  ');
-      line.textContent = preview;
-      const time = document.createElement('div');
-      time.className = 'time';
-      time.textContent = fmtTime(e.timestamp);
-      fields.appendChild(line);
-      fields.appendChild(time);
-
-      const del = document.createElement('button');
-      del.className = 'del';
-      del.textContent = '✕';
-      del.setAttribute('aria-label', 'Eliminar registro');
-      del.onclick = () => removeEntry(realIdx);
-
-      row.appendChild(idx);
-      row.appendChild(fields);
-      row.appendChild(del);
-      manifestEl.appendChild(row);
-    });
-  }
-
-  function persist(){
-    try{
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
-    }catch(err){
-      console.error('No se pudo guardar', err);
-    }
-  }
-
-  function loadEntries(){
-    try{
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw){ entries = JSON.parse(raw); }
-    }catch(err){ entries = []; }
-    render();
-  }
-
-  function removeEntry(idx){
-    entries.splice(idx, 1);
-    persist();
-    render();
-  }
-
-  clearBtn.onclick = () => {
-    if (entries.length === 0) return;
-    if (confirm('¿Vaciar toda la lista? Esta acción no se puede deshacer.')){
-      entries = [];
-      persist();
-      render();
-    }
-  };
-
-  exportBtn.onclick = () => {
-    if (entries.length === 0) return;
-    const cols = allColumns();
-    const rows = entries.map(e => {
-      const row = {};
-      cols.forEach(c => { row[c] = e.data[c] !== undefined ? e.data[c] : ''; });
-      row['hora_escaneo'] = fmtTime(e.timestamp);
-      return row;
-    });
-    const ws = XLSX.utils.json_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Escaneos');
-    const stamp = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
-    XLSX.writeFile(wb, 'escaneos-qr-' + stamp + '.xlsx');
-  };
-
-  function flashOk(){
-    flashEl.classList.remove('hit');
-    void flashEl.offsetWidth;
-    flashEl.classList.add('hit');
-  }
-
-  function applyZoom(value){
-    zoomLevel = value;
-    zoomLabel.textContent = value.toFixed(1) + 'x';
-    video.style.transform = 'scale(' + value + ')';
-    if (trackSupportsZoom && currentStream){
-      const track = currentStream.getVideoTracks()[0];
-      if (track){
-        track.applyConstraints({ advanced: [{ zoom: value }] }).catch(() => {});
-      }
-    }
-  }
-
-  zoomRange.addEventListener('input', () => {
-    applyZoom(parseFloat(zoomRange.value));
-  });
-
-  function handleDecoded(text){
-    const now = Date.now();
-    if (text === lastCode && (now - lastCodeTime) < DEBOUNCE_MS) return;
-    lastCode = text;
-    lastCodeTime = now;
-
-    const yaExiste = entries.some(e => e.rawText === text);
-    if (yaExiste){
-      setStatus('Este código ya fue registrado antes ⚠', 'err');
-      setTimeout(() => setStatus('Buscando código QR…'), 1800);
-      return;
-    }
-
-    let data;
-    try{
-      data = JSON.parse(text);
-      if (typeof data !== 'object' || data === null || Array.isArray(data)){
-        throw new Error('not an object');
-      }
-    }catch(err){
-      setStatus('QR leído, pero no contiene datos JSON válidos.', 'err');
-      return;
-    }
-
-    entries.push({ timestamp: new Date().toISOString(), data, rawText: text });
-    persist();
-    render();
-    flashOk();
-    setStatus('Registro añadido ✓', 'ok');
-    setTimeout(() => setStatus('Buscando código QR…'), 1400);
-  }
-
-  async function tick(){
-    if (video.readyState === video.HAVE_ENOUGH_DATA && video.videoWidth > 0){
-      // Detectar si el video dejó de avanzar (se "congeló")
-      if (video.currentTime === lastVideoTime){
-        stallTicks++;
-      } else {
-        stallTicks = 0;
-        lastVideoTime = video.currentTime;
-      }
-      if (stallTicks >= 6){
-        stallTicks = 0;
-        setStatus('La cámara se congeló, reiniciando…', 'err');
-        stopCamera();
-        setTimeout(startCamera, 300);
-        return;
-      }
-      if (video.paused){
-        video.play().catch(() => {});
-      }
-
-      const vw = video.videoWidth, vh = video.videoHeight;
-      const fullSide = Math.min(vw, vh);
-      const side = fullSide / zoomLevel;
-      const sx = (vw - side) / 2, sy = (vh - side) / 2;
-
-      let found = null;
-      let engineError = null;
-      try{
-        ctx.drawImage(video, sx, sy, side, side, 0, 0, SCAN_SIZE, SCAN_SIZE);
-        const imageData = ctx.getImageData(0, 0, SCAN_SIZE, SCAN_SIZE);
-
-        const symbols = await Promise.race([
-          zbarWasm.scanImageData(imageData),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 900))
-        ]);
-        if (symbols && symbols.length){
-          found = symbols[0].decode();
-        }
-      }catch(err){
-        engineError = (err && err.message) ? err.message : String(err);
-        console.error('Error del motor de escaneo:', err);
-      }
-
-      if (found){
-        handleDecoded(found);
-      } else if (engineError && engineError !== 'timeout'){
-        setStatus('Error del motor: ' + engineError, 'err');
-      } else if (!statusEl.classList.contains('ok')) {
-        setStatus('Buscando código QR… (' + vw + '×' + vh + ' · zbar)');
-      }
-    }
-    scanTimer = setTimeout(tick, SCAN_INTERVAL_MS);
-  }
-
-  function stopCamera(){
-    if (scanTimer){ clearTimeout(scanTimer); scanTimer = null; }
-    if (currentStream){
-      currentStream.getTracks().forEach(track => track.stop());
-      currentStream = null;
-    }
-    video.srcObject = null;
-  }
-
-  let starting = false;
-
-  async function startCamera(){
-    if (currentStream || starting) return;
-    starting = true;
-    let stream;
-    try{
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: 'environment',
-          width: { ideal: 960, max: 1280 },
-          height: { ideal: 960, max: 1280 },
-          frameRate: { ideal: 15, max: 20 }
-        },
-        audio: false
-      });
-    }catch(err){
-      starting = false;
-      setStatus('No se pudo acceder a la cámara. Revisa los permisos.', 'err');
-      return;
-    }
-
-    currentStream = stream;
-    video.srcObject = stream;
-    lastVideoTime = -1;
-    stallTicks = 0;
-
-    trackSupportsZoom = false;
-    const track = stream.getVideoTracks()[0];
-    if (track && track.getCapabilities){
-      try{
-        const caps = track.getCapabilities();
-        trackSupportsZoom = !!(caps && caps.zoom);
-      }catch(e){ trackSupportsZoom = false; }
-    }
-    zoomRange.value = '1';
-    applyZoom(1);
-
-    try{
-      await video.play();
-    }catch(err){
-      // El play() puede interrumpirse por el propio cartel de permiso de iOS;
-      // el video igual queda corriendo, así que no lo tratamos como error fatal.
-    }
-    starting = false;
-    if (currentStream){
-      setStatus('Buscando código QR…');
-      tick();
-    }
-  }
-
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden){
-      if (!starting){ stopCamera(); }
-    } else if (!currentStream && !starting){
-      startCamera();
-    }
-  });
-
-  window.addEventListener('pagehide', stopCamera);
-
-  loadEntries();
-  startCamera();
-})();
-</script>
-
-</body>
-</html>
+      fields.className
