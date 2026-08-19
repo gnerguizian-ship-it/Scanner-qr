@@ -257,4 +257,355 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
       idx.textContent = String(realIdx + 1);
 
       const fields = document.createElement('div');
-      fields.className
+      fields.className = 'fields';
+      const line = document.createElement('div');
+      line.className = 'line';
+      const preview = Object.entries(e.data).map(([k,v]) => k + ': ' + v).join('  ·  ');
+      line.textContent = preview;
+      const time = document.createElement('div');
+      time.className = 'time';
+      time.textContent = fmtTime(e.timestamp);
+      fields.appendChild(line);
+      fields.appendChild(time);
+
+      const del = document.createElement('button');
+      del.className = 'del';
+      del.textContent = '✕';
+      del.setAttribute('aria-label', 'Eliminar registro');
+      del.onclick = () => removeEntry(realIdx);
+
+      row.appendChild(idx);
+      row.appendChild(fields);
+      row.appendChild(del);
+      manifestEl.appendChild(row);
+    });
+  }
+
+  function persist(){
+    try{
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+    }catch(err){
+      console.error('No se pudo guardar', err);
+    }
+  }
+
+  function loadEntries(){
+    try{
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw){ entries = JSON.parse(raw); }
+    }catch(err){ entries = []; }
+    render();
+  }
+
+  function removeEntry(idx){
+    entries.splice(idx, 1);
+    persist();
+    render();
+  }
+
+  clearBtn.onclick = () => {
+    if (entries.length === 0) return;
+    if (confirm('¿Vaciar toda la lista? Esta acción no se puede deshacer.')){
+      entries = [];
+      persist();
+      render();
+    }
+  };
+
+  exportBtn.onclick = () => {
+    if (entries.length === 0) return;
+    const cols = allColumns();
+    const rows = entries.map(e => {
+      const row = {};
+      cols.forEach(c => { row[c] = e.data[c] !== undefined ? e.data[c] : ''; });
+      row['hora_escaneo'] = fmtTime(e.timestamp);
+      return row;
+    });
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Escaneos');
+    const stamp = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+    XLSX.writeFile(wb, 'escaneos-qr-' + stamp + '.xlsx');
+  };
+
+  function flashOk(){
+    flashEl.classList.remove('hit');
+    void flashEl.offsetWidth;
+    flashEl.classList.add('hit');
+  }
+
+  function applyZoom(value){
+    zoomLevel = value;
+    zoomLabel.textContent = value.toFixed(1) + 'x';
+    video.style.transform = 'scale(' + value + ')';
+    if (currentStream){
+      const track = currentStream.getVideoTracks()[0];
+      if (track){
+        const advanced = [];
+        if (trackSupportsZoom){ advanced.push({ zoom: value }); }
+        if (trackSupportsFocus){ advanced.push({ focusMode: 'continuous' }); }
+        if (advanced.length){
+          track.applyConstraints({ advanced }).catch(() => {});
+        }
+      }
+    }
+  }
+
+  zoomRange.addEventListener('input', () => {
+    applyZoom(parseFloat(zoomRange.value));
+  });
+
+  function handleDecoded(text){
+    const now = Date.now();
+    if (text === lastCode && (now - lastCodeTime) < DEBOUNCE_MS) return;
+    lastCode = text;
+    lastCodeTime = now;
+
+    const yaExiste = entries.some(e => e.rawText === text);
+    if (yaExiste){
+      setStatus('Este código ya fue registrado antes ⚠', 'err');
+      setTimeout(() => setStatus('Buscando código QR…'), 1800);
+      return;
+    }
+
+    let data;
+    try{
+      data = JSON.parse(text);
+      if (typeof data !== 'object' || data === null || Array.isArray(data)){
+        throw new Error('not an object');
+      }
+    }catch(err){
+      setStatus('QR leído, pero no contiene datos JSON válidos.', 'err');
+      return;
+    }
+
+    entries.push({ timestamp: new Date().toISOString(), data, rawText: text });
+    persist();
+    render();
+    flashOk();
+    setStatus('Registro añadido ✓', 'ok');
+    setTimeout(() => setStatus('Buscando código QR…'), 1400);
+  }
+
+  async function tick(){
+    if (video.readyState === video.HAVE_ENOUGH_DATA && video.videoWidth > 0){
+      // Detectar si el video dejó de avanzar (se "congeló")
+      if (video.currentTime === lastVideoTime){
+        stallTicks++;
+      } else {
+        stallTicks = 0;
+        lastVideoTime = video.currentTime;
+      }
+      if (stallTicks >= 6){
+        stallTicks = 0;
+        setStatus('La cámara se congeló, reiniciando…', 'err');
+        stopCamera();
+        setTimeout(startCamera, 300);
+        return;
+      }
+      if (video.paused){
+        video.play().catch(() => {});
+      }
+
+      const vw = video.videoWidth, vh = video.videoHeight;
+      const fullSide = Math.min(vw, vh);
+      const side = fullSide / zoomLevel;
+      const sx = (vw - side) / 2, sy = (vh - side) / 2;
+
+      let found = null;
+      let engineError = null;
+      try{
+        ctx.drawImage(video, sx, sy, side, side, 0, 0, SCAN_SIZE, SCAN_SIZE);
+        const imageData = ctx.getImageData(0, 0, SCAN_SIZE, SCAN_SIZE);
+
+        const symbols = await Promise.race([
+          zbarWasm.scanImageData(imageData),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1200))
+        ]);
+        if (symbols && symbols.length){
+          found = symbols[0].decode();
+        }
+
+        // Si varios cuadros seguidos no detectaron nada, probamos una versión
+        // con más contraste y en blanco y negro: ayuda con QR sucios, arrugados
+        // o con poca luz, sin hacer más lento el caso normal.
+        if (!found && missStreak >= 2){
+          procCtx.filter = 'grayscale(100%) contrast(190%) brightness(112%)';
+          procCtx.drawImage(canvas, 0, 0);
+          procCtx.filter = 'none';
+          const procData = procCtx.getImageData(0, 0, SCAN_SIZE, SCAN_SIZE);
+          const symbols2 = await Promise.race([
+            zbarWasm.scanImageData(procData),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1200))
+          ]);
+          if (symbols2 && symbols2.length){
+            found = symbols2[0].decode();
+          }
+        }
+      }catch(err){
+        engineError = (err && err.message) ? err.message : String(err);
+        console.error('Error del motor de escaneo:', err);
+      }
+
+      if (found){
+        missStreak = 0;
+        handleDecoded(found);
+      } else {
+        missStreak++;
+      }
+
+      if (!found && engineError && engineError !== 'timeout'){
+        setStatus('Error del motor: ' + engineError, 'err');
+      } else if (!found && !statusEl.classList.contains('ok')) {
+        setStatus('Buscando código QR… (' + vw + '×' + vh + ' · zbar)');
+      }
+    }
+    scanTimer = setTimeout(tick, SCAN_INTERVAL_MS);
+  }
+
+  function stopCamera(){
+    if (scanTimer){ clearTimeout(scanTimer); scanTimer = null; }
+    if (currentStream){
+      currentStream.getTracks().forEach(track => track.stop());
+      currentStream = null;
+    }
+    video.srcObject = null;
+  }
+
+  let starting = false;
+
+  async function startCamera(){
+    if (currentStream || starting) return;
+    starting = true;
+    let stream;
+    try{
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: 'environment',
+          width: { ideal: 1440, max: 1920 },
+          height: { ideal: 1440, max: 1920 },
+          frameRate: { ideal: 30, max: 30 }
+        },
+        audio: false
+      });
+    }catch(err){
+      starting = false;
+      setStatus('No se pudo acceder a la cámara. Revisa los permisos.', 'err');
+      return;
+    }
+
+    currentStream = stream;
+    video.srcObject = stream;
+    lastVideoTime = -1;
+    stallTicks = 0;
+
+    trackSupportsZoom = false;
+    trackSupportsFocus = false;
+    const track = stream.getVideoTracks()[0];
+    if (track && track.getCapabilities){
+      try{
+        const caps = track.getCapabilities();
+        trackSupportsZoom = !!(caps && caps.zoom);
+        trackSupportsFocus = !!(caps && caps.focusMode && caps.focusMode.includes('continuous'));
+      }catch(e){ trackSupportsZoom = false; trackSupportsFocus = false; }
+    }
+    zoomRange.value = '1';
+    applyZoom(1);
+
+    if (trackSupportsFocus && track){
+      track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(() => {});
+    }
+
+    try{
+      await video.play();
+    }catch(err){
+      // El play() puede interrumpirse por el propio cartel de permiso de iOS;
+      // el video igual queda corriendo, así que no lo tratamos como error fatal.
+    }
+    starting = false;
+    if (currentStream){
+      setStatus('Buscando código QR…');
+      tick();
+    }
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden){
+      if (!starting){ stopCamera(); }
+    } else if (!currentStream && !starting){
+      startCamera();
+    }
+  });
+
+  window.addEventListener('pagehide', stopCamera);
+
+  async function scanUploadedFile(file){
+    if (!file) return;
+    uploadBtn.textContent = '⏳ Analizando foto…';
+    uploadBtn.disabled = true;
+    try{
+      const bitmap = await new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = URL.createObjectURL(file);
+      });
+
+      const MAX_SIDE = 1800;
+      let w = bitmap.naturalWidth, h = bitmap.naturalHeight;
+      if (Math.max(w, h) > MAX_SIDE){
+        const scale = MAX_SIDE / Math.max(w, h);
+        w = Math.round(w * scale);
+        h = Math.round(h * scale);
+      }
+
+      const tmpCanvas = document.createElement('canvas');
+      tmpCanvas.width = w;
+      tmpCanvas.height = h;
+      const tmpCtx = tmpCanvas.getContext('2d', { willReadFrequently: true });
+      tmpCtx.drawImage(bitmap, 0, 0, w, h);
+      const imageData = tmpCtx.getImageData(0, 0, w, h);
+
+      const symbols = await zbarWasm.scanImageData(imageData);
+      if (symbols && symbols.length){
+        handleDecoded(symbols[0].decode());
+      } else {
+        // Intento de respaldo con más contraste, por si la foto tiene poca luz o está sucia
+        const enhCanvas = document.createElement('canvas');
+        enhCanvas.width = w; enhCanvas.height = h;
+        const enhCtx = enhCanvas.getContext('2d', { willReadFrequently: true });
+        enhCtx.filter = 'grayscale(100%) contrast(190%) brightness(112%)';
+        enhCtx.drawImage(tmpCanvas, 0, 0);
+        const enhData = enhCtx.getImageData(0, 0, w, h);
+        const symbols2 = await zbarWasm.scanImageData(enhData);
+        if (symbols2 && symbols2.length){
+          handleDecoded(symbols2[0].decode());
+        } else {
+          setStatus('No se encontró ningún código QR en esa foto.', 'err');
+          setTimeout(() => setStatus('Buscando código QR…'), 2200);
+        }
+      }
+    }catch(err){
+      console.error('Error analizando la foto:', err);
+      setStatus('No se pudo analizar la foto.', 'err');
+    }finally{
+      uploadBtn.textContent = '📷 Subir una foto con un QR';
+      uploadBtn.disabled = false;
+      fileInput.value = '';
+    }
+  }
+
+  uploadBtn.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files && fileInput.files[0]){
+      scanUploadedFile(fileInput.files[0]);
+    }
+  });
+
+  loadEntries();
+  startCamera();
+})();
+</script>
+
+</body>
+</html>
