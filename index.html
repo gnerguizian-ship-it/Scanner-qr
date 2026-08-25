@@ -83,6 +83,26 @@
   }
   .uploadBtn:active{ border-color:var(--amber); color:var(--amber); }
 
+  .manualPanel{ margin:0 16px 14px; }
+  .manualForm{
+    margin-top:10px; padding:14px; border-radius:10px;
+    background:var(--panel); border:1px solid var(--line);
+  }
+  .manualRow{ display:flex; gap:8px; margin-bottom:10px; }
+  .manualRow input{
+    flex:1; min-width:0; padding:10px; border-radius:8px; border:1px solid var(--line);
+    background:var(--bg); color:var(--ink); font-family:'IBM Plex Mono', monospace; font-size:12.5px;
+  }
+  .manualRow input:focus{ outline:none; border-color:var(--amber); }
+  .manualRow input::placeholder{ color:var(--ink-dim); }
+  .manualActions{ display:flex; gap:10px; }
+  .manualActions button{
+    flex:1; padding:11px; border-radius:8px; border:1px solid var(--line);
+    font-family:'Space Grotesk', sans-serif; font-weight:700; font-size:12.5px; cursor:pointer;
+  }
+  .manualSave{ background:var(--amber); color:#141414; border-color:var(--amber); }
+  .manualCancel{ background:var(--panel-2); color:var(--ink-dim); }
+
   .flash{ position:absolute; inset:0; background:var(--ok); opacity:0; pointer-events:none; }
   .flash.hit{ animation: blink 320ms ease-out; }
   @keyframes blink{ 0%{opacity:0.5;} 100%{opacity:0;} }
@@ -158,6 +178,24 @@
   <button type="button" class="uploadBtn" id="uploadBtn">📷 Subir una foto con un QR</button>
 </div>
 
+<div class="manualPanel">
+  <button type="button" class="uploadBtn" id="manualToggleBtn">✏️ Agregar manualmente</button>
+  <div class="manualForm" id="manualForm" style="display:none;">
+    <div class="manualRow">
+      <input type="text" id="manualKey1" placeholder="Nombre del campo 1 (ej: producto)">
+      <input type="text" id="manualVal1" placeholder="Valor (ej: Caja A)">
+    </div>
+    <div class="manualRow">
+      <input type="text" id="manualKey2" placeholder="Nombre del campo 2 (ej: cantidad)">
+      <input type="text" id="manualVal2" placeholder="Valor (ej: 12)">
+    </div>
+    <div class="manualActions">
+      <button type="button" class="manualCancel" id="manualCancelBtn">Cancelar</button>
+      <button type="button" class="manualSave" id="manualSaveBtn">Agregar a la lista</button>
+    </div>
+  </div>
+</div>
+
 <main>
   <div class="section-label">
     <span>Lista</span>
@@ -201,6 +239,14 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
   const zoomLabel = document.getElementById('zoomLabel');
   const fileInput = document.getElementById('fileInput');
   const uploadBtn = document.getElementById('uploadBtn');
+  const manualToggleBtn = document.getElementById('manualToggleBtn');
+  const manualForm = document.getElementById('manualForm');
+  const manualKey1 = document.getElementById('manualKey1');
+  const manualVal1 = document.getElementById('manualVal1');
+  const manualKey2 = document.getElementById('manualKey2');
+  const manualVal2 = document.getElementById('manualVal2');
+  const manualCancelBtn = document.getElementById('manualCancelBtn');
+  const manualSaveBtn = document.getElementById('manualSaveBtn');
 
   let zoomLevel = 1;
   let trackSupportsZoom = false;
@@ -344,18 +390,27 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
     applyZoom(parseFloat(zoomRange.value));
   });
 
+  function addEntry(data, rawText){
+    const yaExiste = entries.some(e => e.rawText === rawText);
+    if (yaExiste){
+      setStatus('Este código ya fue registrado antes ⚠', 'err');
+      setTimeout(() => setStatus('Buscando código QR…'), 1800);
+      return false;
+    }
+    entries.push({ timestamp: new Date().toISOString(), data, rawText });
+    persist();
+    render();
+    flashOk();
+    setStatus('Registro añadido ✓', 'ok');
+    setTimeout(() => setStatus('Buscando código QR…'), 1400);
+    return true;
+  }
+
   function handleDecoded(text){
     const now = Date.now();
     if (text === lastCode && (now - lastCodeTime) < DEBOUNCE_MS) return;
     lastCode = text;
     lastCodeTime = now;
-
-    const yaExiste = entries.some(e => e.rawText === text);
-    if (yaExiste){
-      setStatus('Este código ya fue registrado antes ⚠', 'err');
-      setTimeout(() => setStatus('Buscando código QR…'), 1800);
-      return;
-    }
 
     let data;
     try{
@@ -368,12 +423,7 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
       return;
     }
 
-    entries.push({ timestamp: new Date().toISOString(), data, rawText: text });
-    persist();
-    render();
-    flashOk();
-    setStatus('Registro añadido ✓', 'ok');
-    setTimeout(() => setStatus('Buscando código QR…'), 1400);
+    addEntry(data, text);
   }
 
   async function tick(){
@@ -548,6 +598,56 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
   fileInput.addEventListener('change', () => {
     if (fileInput.files && fileInput.files[0]){
       scanUploadedFile(fileInput.files[0]);
+    }
+  });
+
+  function resetManualForm(){
+    manualKey1.value = '';
+    manualVal1.value = '';
+    manualKey2.value = '';
+    manualVal2.value = '';
+  }
+
+  function closeManualForm(){
+    manualForm.style.display = 'none';
+    manualToggleBtn.textContent = '✏️ Agregar manualmente';
+    resetManualForm();
+  }
+
+  manualToggleBtn.addEventListener('click', () => {
+    const isOpen = manualForm.style.display !== 'none';
+    if (isOpen){
+      closeManualForm();
+    } else {
+      manualForm.style.display = 'block';
+      manualToggleBtn.textContent = '✕ Cerrar formulario';
+      manualKey1.focus();
+    }
+  });
+
+  manualCancelBtn.addEventListener('click', closeManualForm);
+
+  manualSaveBtn.addEventListener('click', () => {
+    const k1 = manualKey1.value.trim();
+    const v1 = manualVal1.value.trim();
+    const k2 = manualKey2.value.trim();
+    const v2 = manualVal2.value.trim();
+
+    if (!k1 || !v1){
+      manualKey1.focus();
+      setStatus('Completá al menos el campo 1 (nombre y valor).', 'err');
+      setTimeout(() => setStatus('Buscando código QR…'), 2200);
+      return;
+    }
+
+    const data = {};
+    data[k1] = v1;
+    if (k2 && v2){ data[k2] = v2; }
+
+    const rawText = JSON.stringify(data);
+    const added = addEntry(data, rawText);
+    if (added){
+      closeManualForm();
     }
   });
 
