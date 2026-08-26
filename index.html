@@ -88,10 +88,15 @@
     margin-top:10px; padding:14px; border-radius:10px;
     background:var(--panel); border:1px solid var(--line);
   }
-  .manualRow{ display:flex; gap:8px; margin-bottom:10px; }
+  .manualRow{ margin-bottom:10px; }
+  .manualRow label{
+    display:block; font-size:10.5px; color:var(--amber); margin-bottom:4px;
+    text-transform:uppercase; letter-spacing:0.08em;
+  }
   .manualRow input{
-    flex:1; min-width:0; padding:10px; border-radius:8px; border:1px solid var(--line);
-    background:var(--bg); color:var(--ink); font-family:'IBM Plex Mono', monospace; font-size:12.5px;
+    width:100%; padding:10px; border-radius:8px; border:1px solid var(--line);
+    background:var(--bg); color:var(--ink); font-family:'IBM Plex Mono', monospace; font-size:13px;
+    box-sizing:border-box;
   }
   .manualRow input:focus{ outline:none; border-color:var(--amber); }
   .manualRow input::placeholder{ color:var(--ink-dim); }
@@ -182,12 +187,12 @@
   <button type="button" class="uploadBtn" id="manualToggleBtn">✏️ Agregar manualmente</button>
   <div class="manualForm" id="manualForm" style="display:none;">
     <div class="manualRow">
-      <input type="text" id="manualKey1" placeholder="Nombre del campo 1 (ej: producto)">
-      <input type="text" id="manualVal1" placeholder="Valor (ej: Caja A)">
+      <label id="manualLabel1" for="manualVal1">Campo 1</label>
+      <input type="text" id="manualVal1" placeholder="Valor">
     </div>
     <div class="manualRow">
-      <input type="text" id="manualKey2" placeholder="Nombre del campo 2 (ej: cantidad)">
-      <input type="text" id="manualVal2" placeholder="Valor (ej: 12)">
+      <label id="manualLabel2" for="manualVal2">Campo 2</label>
+      <input type="text" id="manualVal2" placeholder="Valor">
     </div>
     <div class="manualActions">
       <button type="button" class="manualCancel" id="manualCancelBtn">Cancelar</button>
@@ -241,9 +246,9 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
   const uploadBtn = document.getElementById('uploadBtn');
   const manualToggleBtn = document.getElementById('manualToggleBtn');
   const manualForm = document.getElementById('manualForm');
-  const manualKey1 = document.getElementById('manualKey1');
+  const manualLabel1 = document.getElementById('manualLabel1');
   const manualVal1 = document.getElementById('manualVal1');
-  const manualKey2 = document.getElementById('manualKey2');
+  const manualLabel2 = document.getElementById('manualLabel2');
   const manualVal2 = document.getElementById('manualVal2');
   const manualCancelBtn = document.getElementById('manualCancelBtn');
   const manualSaveBtn = document.getElementById('manualSaveBtn');
@@ -602,9 +607,7 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
   });
 
   function resetManualForm(){
-    manualKey1.value = '';
     manualVal1.value = '';
-    manualKey2.value = '';
     manualVal2.value = '';
   }
 
@@ -614,35 +617,41 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
     resetManualForm();
   }
 
+  let manualK1 = 'campo1';
+  let manualK2 = '';
+
   manualToggleBtn.addEventListener('click', () => {
     const isOpen = manualForm.style.display !== 'none';
     if (isOpen){
       closeManualForm();
     } else {
+      const cols = allColumns();
+      manualK1 = cols[0] || 'campo1';
+      manualK2 = cols[1] || '';
+      manualLabel1.textContent = manualK1;
+      manualLabel2.textContent = manualK2 || 'Campo 2 (opcional)';
       manualForm.style.display = 'block';
       manualToggleBtn.textContent = '✕ Cerrar formulario';
-      manualKey1.focus();
+      manualVal1.focus();
     }
   });
 
   manualCancelBtn.addEventListener('click', closeManualForm);
 
   manualSaveBtn.addEventListener('click', () => {
-    const k1 = manualKey1.value.trim();
     const v1 = manualVal1.value.trim();
-    const k2 = manualKey2.value.trim();
     const v2 = manualVal2.value.trim();
 
-    if (!k1 || !v1){
-      manualKey1.focus();
-      setStatus('Completá al menos el campo 1 (nombre y valor).', 'err');
+    if (!v1){
+      manualVal1.focus();
+      setStatus('Completá al menos el valor de "' + manualK1 + '".', 'err');
       setTimeout(() => setStatus('Buscando código QR…'), 2200);
       return;
     }
 
     const data = {};
-    data[k1] = v1;
-    if (k2 && v2){ data[k2] = v2; }
+    data[manualK1] = v1;
+    if (manualK2 && v2){ data[manualK2] = v2; }
 
     const rawText = JSON.stringify(data);
     const added = addEntry(data, rawText);
