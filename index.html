@@ -129,6 +129,25 @@
 
   .empty{ padding:28px 16px; text-align:center; color:var(--ink-dim); font-size:12.5px; line-height:1.6; }
 
+  .counterPanel{ margin-bottom:14px; }
+  .counterTitle{
+    font-size:11px; letter-spacing:0.14em; color:var(--ink-dim); text-transform:uppercase;
+    margin: 0 2px 8px;
+  }
+  .counterList{ display:flex; flex-wrap:wrap; gap:8px; }
+  .countChip{
+    display:flex; align-items:center; gap:6px;
+    padding:7px 10px; border-radius:20px;
+    background:var(--panel); border:1px solid var(--line);
+    font-size:12px;
+  }
+  .countChip .cVal{ color:var(--ink); max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .countChip .cNum{
+    background:var(--amber); color:#141414; font-weight:700;
+    border-radius:10px; padding:1px 7px; font-size:11px; font-family:'Space Grotesk', sans-serif;
+  }
+  .counterEmpty{ color:var(--ink-dim); font-size:11.5px; }
+
   footer{ display:flex; gap:10px; padding:12px 16px; border-top:1px solid var(--line); background:var(--panel); }
   button.action{
     flex:1; padding:14px 10px; border-radius:10px; border:1px solid var(--line);
@@ -202,6 +221,11 @@
 </div>
 
 <main>
+  <div class="counterPanel" id="counterPanel">
+    <div class="counterTitle" id="counterTitle">Totales</div>
+    <div class="counterList" id="counterList"></div>
+  </div>
+
   <div class="section-label">
     <span>Lista</span>
     <span id="colHint" style="color:var(--ink-dim); font-weight:400;"></span>
@@ -240,6 +264,8 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
   const colHint = document.getElementById('colHint');
   const exportBtn = document.getElementById('exportBtn');
   const clearBtn = document.getElementById('clearBtn');
+  const counterTitle = document.getElementById('counterTitle');
+  const counterList = document.getElementById('counterList');
   const zoomRange = document.getElementById('zoomRange');
   const zoomLabel = document.getElementById('zoomLabel');
   const fileInput = document.getElementById('fileInput');
@@ -279,11 +305,49 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
     return cols;
   }
 
+  function renderCounters(){
+    const cols = allColumns();
+    const key = cols[0];
+    counterTitle.textContent = key ? ('Totales por ' + key) : 'Totales';
+    counterList.innerHTML = '';
+
+    if (!key || entries.length === 0){
+      const span = document.createElement('span');
+      span.className = 'counterEmpty';
+      span.textContent = 'Sin datos todavía';
+      counterList.appendChild(span);
+      return;
+    }
+
+    const counts = {};
+    entries.forEach(e => {
+      const v = e.data && e.data[key] !== undefined ? String(e.data[key]) : null;
+      if (v !== null){ counts[v] = (counts[v] || 0) + 1; }
+    });
+
+    Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .forEach(([val, count]) => {
+        const chip = document.createElement('div');
+        chip.className = 'countChip';
+        const vSpan = document.createElement('span');
+        vSpan.className = 'cVal';
+        vSpan.textContent = val;
+        const nSpan = document.createElement('span');
+        nSpan.className = 'cNum';
+        nSpan.textContent = count;
+        chip.appendChild(vSpan);
+        chip.appendChild(nSpan);
+        counterList.appendChild(chip);
+      });
+  }
+
   function render(){
     countN.textContent = entries.length;
     exportBtn.disabled = entries.length === 0;
     const cols = allColumns();
     colHint.textContent = cols.length ? cols.join(' · ') : '';
+    renderCounters();
 
     if (entries.length === 0){
       manifestEl.innerHTML = '';
