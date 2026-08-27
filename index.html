@@ -27,7 +27,8 @@
     color:var(--ink);
     font-family:'IBM Plex Mono', monospace;
     display:flex; flex-direction:column;
-    min-height:100vh;
+    height:100vh; height:100dvh;
+    overflow:hidden;
     padding-bottom: env(safe-area-inset-bottom);
   }
   header{
@@ -43,7 +44,7 @@
 
   .scanner{
     position:relative; margin:16px; border-radius:14px; overflow:hidden;
-    background:#000; aspect-ratio: 1 / 1; max-height: 46vh;
+    background:#000; aspect-ratio: 1 / 1; max-height: 30vh;
     border:1px solid var(--line);
   }
   video{ width:100%; height:100%; object-fit:cover; display:block; transform-origin:center; transition: transform 0.12s ease-out; }
@@ -73,19 +74,25 @@
     flex:1; accent-color: var(--amber);
   }
 
-  .uploadBar{ margin:0 16px 14px; }
-  .uploadBtn{
-    width:100%; padding:12px; border-radius:10px; border:1px dashed var(--line);
-    background:var(--panel); color:var(--ink-dim);
-    font-family:'IBM Plex Mono', monospace; font-size:12.5px;
-    display:flex; align-items:center; justify-content:center; gap:8px;
-    cursor:pointer;
+  .actionRow{
+    display:flex; gap:10px; margin:0 16px 12px;
   }
-  .uploadBtn:active{ border-color:var(--amber); color:var(--amber); }
+  .iconBtn{
+    flex:1; aspect-ratio:1/1; max-width:72px;
+    border-radius:14px; border:1px solid var(--line);
+    background:var(--panel); color:var(--ink);
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer; padding:0;
+  }
+  .iconBtn svg{ width:22px; height:22px; stroke:var(--ink); fill:none; stroke-width:1.8; }
+  .iconBtn:active{ border-color:var(--amber); }
+  .iconBtn:active svg{ stroke:var(--amber); }
+  .iconBtn:disabled{ opacity:0.35; }
+  .iconBtn.active{ border-color:var(--amber); background:var(--panel-2); }
+  .iconBtn.active svg{ stroke:var(--amber); }
 
-  .manualPanel{ margin:0 16px 14px; }
   .manualForm{
-    margin-top:10px; padding:14px; border-radius:10px;
+    margin:0 16px 14px; padding:14px; border-radius:10px;
     background:var(--panel); border:1px solid var(--line);
   }
   .manualRow{ margin-bottom:10px; }
@@ -129,7 +136,7 @@
 
   .empty{ padding:28px 16px; text-align:center; color:var(--ink-dim); font-size:12.5px; line-height:1.6; }
 
-  .counterPanel{ margin-bottom:14px; }
+  .counterPanel{ margin:0 16px 14px; }
   .counterTitle{
     font-size:11px; letter-spacing:0.14em; color:var(--ink-dim); text-transform:uppercase;
     margin: 0 2px 8px;
@@ -147,17 +154,6 @@
     border-radius:10px; padding:1px 7px; font-size:11px; font-family:'Space Grotesk', sans-serif;
   }
   .counterEmpty{ color:var(--ink-dim); font-size:11.5px; }
-
-  footer{ display:flex; gap:10px; padding:12px 16px; border-top:1px solid var(--line); background:var(--panel); }
-  button.action{
-    flex:1; padding:14px 10px; border-radius:10px; border:1px solid var(--line);
-    font-family:'Space Grotesk', sans-serif; font-weight:700; font-size:13px;
-    letter-spacing:0.02em; cursor:pointer;
-  }
-  .btn-export{ background:var(--amber); color:#141414; border-color:var(--amber); }
-  .btn-export:disabled{ background:var(--panel-2); color:var(--ink-dim); border-color:var(--line); }
-  .btn-clear{ background:var(--panel-2); color:var(--ink-dim); }
-  .btn-clear:active{ color:var(--laser); }
 
   :focus-visible{ outline:2px solid var(--amber); outline-offset:2px; }
   @media (prefers-reduced-motion: reduce){
@@ -197,35 +193,43 @@
   <span class="zLabel" id="zoomLabel">1.0x</span>
 </div>
 
-<div class="uploadBar">
+<div class="actionRow">
   <input type="file" id="fileInput" accept="image/*" style="display:none">
-  <button type="button" class="uploadBtn" id="uploadBtn">📷 Subir una foto con un QR</button>
+  <button type="button" class="iconBtn" id="uploadBtn" aria-label="Subir foto con un QR" title="Subir foto">
+    <svg viewBox="0 0 24 24"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13.5" r="3.5"/></svg>
+  </button>
+  <button type="button" class="iconBtn" id="manualToggleBtn" aria-label="Agregar manualmente" title="Agregar manualmente">
+    <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+  </button>
+  <button type="button" class="iconBtn" id="clearBtn" aria-label="Vaciar lista" title="Vaciar lista">
+    <svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m-8 0 1 13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1l1-13"/><path d="M10 11v6M14 11v6"/></svg>
+  </button>
+  <button type="button" class="iconBtn" id="exportBtn" disabled aria-label="Exportar a Excel" title="Exportar a Excel">
+    <svg viewBox="0 0 24 24"><rect x="3.5" y="4" width="17" height="16" rx="1.5"/><path d="M3.5 9.5h17M3.5 14.5h17M9.5 9.5v10M14.5 9.5v10"/></svg>
+  </button>
 </div>
 
-<div class="manualPanel">
-  <button type="button" class="uploadBtn" id="manualToggleBtn">✏️ Agregar manualmente</button>
-  <div class="manualForm" id="manualForm" style="display:none;">
-    <div class="manualRow">
-      <label id="manualLabel1" for="manualVal1">Campo 1</label>
-      <input type="text" id="manualVal1" placeholder="Valor">
-    </div>
-    <div class="manualRow">
-      <label id="manualLabel2" for="manualVal2">Campo 2</label>
-      <input type="text" id="manualVal2" placeholder="Valor">
-    </div>
-    <div class="manualActions">
-      <button type="button" class="manualCancel" id="manualCancelBtn">Cancelar</button>
-      <button type="button" class="manualSave" id="manualSaveBtn">Agregar a la lista</button>
-    </div>
+<div class="manualForm" id="manualForm" style="display:none;">
+  <div class="manualRow">
+    <label id="manualLabel1" for="manualVal1">Campo 1</label>
+    <input type="text" id="manualVal1" placeholder="Valor">
   </div>
+  <div class="manualRow">
+    <label id="manualLabel2" for="manualVal2">Campo 2</label>
+    <input type="text" id="manualVal2" placeholder="Valor">
+  </div>
+  <div class="manualActions">
+    <button type="button" class="manualCancel" id="manualCancelBtn">Cancelar</button>
+    <button type="button" class="manualSave" id="manualSaveBtn">Agregar a la lista</button>
+  </div>
+</div>
+
+<div class="counterPanel" id="counterPanel">
+  <div class="counterTitle" id="counterTitle">Totales</div>
+  <div class="counterList" id="counterList"></div>
 </div>
 
 <main>
-  <div class="counterPanel" id="counterPanel">
-    <div class="counterTitle" id="counterTitle">Totales</div>
-    <div class="counterList" id="counterList"></div>
-  </div>
-
   <div class="section-label">
     <span>Lista</span>
     <span id="colHint" style="color:var(--ink-dim); font-weight:400;"></span>
@@ -234,11 +238,6 @@
     <div class="empty" id="emptyMsg">Todavía no hay registros.<br>Apunta la cámara a un código QR para empezar.</div>
   </div>
 </main>
-
-<footer>
-  <button class="action btn-clear" id="clearBtn">Vaciar lista</button>
-  <button class="action btn-export" id="exportBtn" disabled>Exportar a Excel</button>
-</footer>
 
 <script type="module">
 import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.0/dist/main.mjs';
@@ -621,7 +620,6 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
 
   async function scanUploadedFile(file){
     if (!file) return;
-    uploadBtn.textContent = '⏳ Analizando foto…';
     uploadBtn.disabled = true;
     try{
       const bitmap = await new Promise((resolve, reject) => {
@@ -657,7 +655,6 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
       console.error('Error analizando la foto:', err);
       setStatus('No se pudo analizar la foto.', 'err');
     }finally{
-      uploadBtn.textContent = '📷 Subir una foto con un QR';
       uploadBtn.disabled = false;
       fileInput.value = '';
     }
@@ -677,7 +674,7 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
 
   function closeManualForm(){
     manualForm.style.display = 'none';
-    manualToggleBtn.textContent = '✏️ Agregar manualmente';
+    manualToggleBtn.classList.remove('active');
     resetManualForm();
   }
 
@@ -695,7 +692,7 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
       manualLabel1.textContent = manualK1;
       manualLabel2.textContent = manualK2 || 'Campo 2 (opcional)';
       manualForm.style.display = 'block';
-      manualToggleBtn.textContent = '✕ Cerrar formulario';
+      manualToggleBtn.classList.add('active');
       manualVal1.focus();
     }
   });
