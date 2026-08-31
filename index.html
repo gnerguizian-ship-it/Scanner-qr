@@ -269,6 +269,7 @@
 
 <script type="module">
 import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.0/dist/main.mjs';
+import { scan as wechatScan, ready as wechatReady } from 'https://cdn.jsdelivr.net/npm/qr-scanner-wechat/+esm';
 (function(){
   const STORAGE_KEY = 'scans';
   let entries = [];
@@ -316,6 +317,20 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
   let scanTimer = null;
   let lastVideoTime = -1;
   let stallTicks = 0;
+  let missStreak = 0;
+  let wechatReadyPromise = null;
+
+  function ensureWechatReady(){
+    if (!wechatReadyPromise){
+      wechatReadyPromise = wechatReady().catch(err => {
+        console.error('No se pudo cargar WeChatQRCode:', err);
+        wechatReadyPromise = null;
+      });
+    }
+    return wechatReadyPromise;
+  }
+  // Precarga silenciosa en segundo plano para que esté lista cuando haga falta
+  setTimeout(ensureWechatReady, 1500);
 
   function setStatus(text, kind){
     statusEl.textContent = text;
@@ -552,6 +567,7 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
 
       let found = null;
       let engineError = null;
+      let usedWechat = false;
       try{
         ctx.drawImage(video, sx, sy, side, side, 0, 0, SCAN_SIZE, SCAN_SIZE);
         const imageData = ctx.getImageData(0, 0, SCAN_SIZE, SCAN_SIZE);
@@ -563,17 +579,39 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
         if (symbols && symbols.length){
           found = symbols[0].decode();
         }
+
+        // ZBar es rápido pero le cuesta con QR sucios, chicos o inclinados.
+        // Si varios cuadros seguidos no detectan nada, probamos con WeChatQRCode
+        // (motor con redes neuronales, más lento pero mucho más tolerante).
+        if (!found && missStreak >= 2){
+          await ensureWechatReady();
+          if (wechatReadyPromise){
+            const result = await Promise.race([
+              wechatScan(canvas),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2500))
+            ]);
+            if (result && result.text){
+              found = result.text;
+              usedWechat = true;
+            }
+          }
+        }
       }catch(err){
         engineError = (err && err.message) ? err.message : String(err);
         console.error('Error del motor de escaneo:', err);
       }
 
       if (found){
+        missStreak = 0;
         handleDecoded(found);
-      } else if (engineError && engineError !== 'timeout'){
+      } else {
+        missStreak++;
+      }
+
+      if (!found && engineError && engineError !== 'timeout'){
         setStatus('Error del motor: ' + engineError, 'err');
-      } else if (!statusEl.classList.contains('ok')) {
-        setStatus('Buscando código QR… (' + vw + '×' + vh + ' · zbar)');
+      } else if (!found && !statusEl.classList.contains('ok')) {
+        setStatus('Buscando código QR… (' + vw + '×' + vh + (usedWechat ? ' · wechat' : ' · zbar') + ')');
       }
     }
     scanTimer = setTimeout(tick, SCAN_INTERVAL_MS);
@@ -679,8 +717,18 @@ import * as zbarWasm from 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.
       if (symbols && symbols.length){
         handleDecoded(symbols[0].decode());
       } else {
-        setStatus('No se encontró ningún código QR en esa foto.', 'err');
-        setTimeout(() => setStatus('Buscando código QR…'), 2200);
+        // Respaldo con WeChatQRCode, más lento pero más tolerante a fotos difíciles
+        await ensureWechatReady();
+        let result = null;
+        if (wechatReadyPromise){
+          try{ result = await wechatScan(tmpCanvas); }catch(e){ result = null; }
+        }
+        if (result && result.text){
+          handleDecoded(result.text);
+        } else {
+          setStatus('No se encontró ningún código QR en esa foto.', 'err');
+          setTimeout(() => setStatus('Buscando código QR…'), 2200);
+        }
       }
     }catch(err){
       console.error('Error analizando la foto:', err);
