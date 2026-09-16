@@ -469,6 +469,7 @@ import { scan as wechatScan, ready as wechatReady } from 'https://cdn.jsdelivr.n
   exportBtn.onclick = () => {
     if (entries.length === 0) return;
     const cols = allColumns();
+    const allKeys = cols.concat(['hora_escaneo']);
     const rows = entries.map(e => {
       const row = {};
       cols.forEach(c => { row[c] = e.data[c] !== undefined ? e.data[c] : ''; });
@@ -476,6 +477,19 @@ import { scan as wechatScan, ready as wechatReady } from 'https://cdn.jsdelivr.n
       return row;
     });
     const ws = XLSX.utils.json_to_sheet(rows);
+
+    // Ancho de columna según el contenido más largo (encabezado o valores),
+    // para que no quede texto cortado al abrir el Excel.
+    ws['!cols'] = allKeys.map(key => {
+      let maxLen = String(key).length;
+      rows.forEach(r => {
+        const v = r[key];
+        const len = v === undefined || v === null ? 0 : String(v).length;
+        if (len > maxLen){ maxLen = len; }
+      });
+      return { wch: Math.min(Math.max(maxLen + 2, 10), 60) };
+    });
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Escaneos');
     const stamp = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
