@@ -226,7 +226,7 @@
     <svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m-8 0 1 13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1l1-13"/><path d="M10 11v6M14 11v6"/></svg>
   </button>
   <button type="button" class="iconBtn" id="exportBtn" disabled aria-label="Exportar a Excel" title="Exportar a Excel">
-    <svg viewBox="0 0 24 24"><rect x="3.5" y="4" width="17" height="16" rx="1.5"/><path d="M3.5 9.5h17M3.5 14.5h17M9.5 9.5v10M14.5 9.5v10"/></svg>
+    <svg viewBox="0 0 24 24"><path d="M12 3v14M7 13l5 5 5-5M3 21h18"/></svg>
   </button>
 </div>
 
@@ -624,7 +624,7 @@ import { scan as wechatScan, ready as wechatReady } from 'https://cdn.jsdelivr.n
 
       if (!found && engineError && engineError !== 'timeout'){
         setStatus('Error del motor: ' + engineError, 'err');
-      } else if (!found && !statusEl.classList.contains('ok')) {
+      } else if (!found && !statusEl.classList.contains('ok') ) {
         setStatus('Buscando código QR… (' + vw + '×' + vh + (usedWechat ? ' · wechat' : ' · zbar') + ')');
       }
     }
