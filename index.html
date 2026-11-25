@@ -6,7 +6,7 @@
 <title>Escáner · Manifiesto QR</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <style>
   :root{
     --bg: #0F1214;
@@ -464,47 +464,67 @@ import { scan as wechatScan, ready as wechatReady } from 'https://cdn.jsdelivr.n
     }
   };
 
-  exportBtn.onclick = () => {
+  exportBtn.onclick = async () => {
     if (entries.length === 0) return;
     const cols = allColumns();
     const allKeys = cols.concat(['hora_escaneo']);
-    const rows = entries.map(e => {
-      const row = {};
-      cols.forEach(c => { row[c] = e.data[c] !== undefined ? e.data[c] : ''; });
-      row['hora_escaneo'] = fmtTime(e.timestamp);
-      return row;
-    });
-    const ws = XLSX.utils.json_to_sheet(rows);
+    const totalCols = allKeys.length;
 
-    // Ancho de columna según el contenido más largo (encabezado o valores),
-    // para que no quede texto cortado al abrir el Excel.
-    ws['!cols'] = allKeys.map(key => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Escaneos');
+
+    // Fila 1: fecha de exportación
+    const fecha = new Date().toLocaleDateString('es', { day:'2-digit', month:'2-digit', year:'numeric' });
+    ws.mergeCells(1, 1, 1, totalCols);
+    const dateCell = ws.getCell(1, 1);
+    dateCell.value = 'Fecha: ' + fecha;
+    dateCell.font = { bold: true, size: 12 };
+    dateCell.alignment = { horizontal: 'left', vertical: 'middle' };
+
+    // Fila 2: vacía como separación
+    ws.addRow([]);
+
+    // Fila 3: encabezados
+    const headerRow = ws.addRow(allKeys);
+    headerRow.font = { bold: true };
+    headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
+
+    // Filas de datos
+    entries.forEach(e => {
+      const values = cols.map(c => e.data[c] !== undefined ? e.data[c] : '');
+      values.push(fmtTime(e.timestamp));
+      ws.addRow(values);
+    });
+
+    // Ancho de columnas según el contenido más largo
+    allKeys.forEach((key, i) => {
       let maxLen = String(key).length;
-      rows.forEach(r => {
-        const v = r[key];
+      entries.forEach(e => {
+        const v = key === 'hora_escaneo' ? fmtTime(e.timestamp) : e.data[key];
         const len = v === undefined || v === null ? 0 : String(v).length;
         if (len > maxLen){ maxLen = len; }
       });
-      return { wch: Math.min(Math.max(maxLen + 2, 10), 60) };
+      ws.getColumn(i + 1).width = Math.min(Math.max(maxLen + 2, 10), 60);
     });
 
-    // Agregar bordes simples a todas las celdas
-    const borderStyle = { style: 'thin', color: { rgb: '000000' } };
-    const border = { top: borderStyle, bottom: borderStyle, left: borderStyle, right: borderStyle };
-    
-    for (let row = 0; row <= rows.length; row++){
-      for (let col = 0; col < allKeys.length; col++){
-        const cellRef = XLSX.utils.encode_cell({ r: row, c: col });
-        if (!ws[cellRef]) ws[cellRef] = {};
-        if (typeof ws[cellRef] === 'string') ws[cellRef] = { v: ws[cellRef] };
-        ws[cellRef].s = { border };
+    // Bordes simples, internos y externos, en la tabla (encabezados + datos)
+    const thin = { style: 'thin', color: { argb: 'FF000000' } };
+    const lastRow = ws.lastRow.number;
+    for (let r = headerRow.number; r <= lastRow; r++){
+      for (let c = 1; c <= totalCols; c++){
+        ws.getCell(r, c).border = { top: thin, bottom: thin, left: thin, right: thin };
       }
     }
 
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Escaneos');
+    const buffer = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const stamp = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
-    XLSX.writeFile(wb, 'escaneos-qr-' + stamp + '.xlsx');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'escaneos-qr-' + stamp + '.xlsx';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
   };
 
   function flashOk(){
@@ -635,7 +655,7 @@ import { scan as wechatScan, ready as wechatReady } from 'https://cdn.jsdelivr.n
 
       if (!found && engineError && engineError !== 'timeout'){
         setStatus('Error del motor: ' + engineError, 'err');
-      } else if (!found && !statusEl.classList.contains('ok') ) {
+      } else if (!found && !statusEl.classList.contains('ok')) {
         setStatus('Buscando código QR… (' + vw + '×' + vh + (usedWechat ? ' · wechat' : ' · zbar') + ')');
       }
     }
